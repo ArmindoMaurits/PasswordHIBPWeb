@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using PasswordHIBPWeb.Models;
 using PasswordHIBPWeb.Models.AccountViewModels;
 using PasswordHIBPWeb.Services;
+using PasswordHIBPWeb.Utils;
 
 namespace PasswordHIBPWeb.Controllers
 {
@@ -24,6 +25,7 @@ namespace PasswordHIBPWeb.Controllers
         private readonly SignInManager<ApplicationUser> _signInManager;
         private readonly IEmailSender _emailSender;
         private readonly ILogger _logger;
+        private readonly HttpUtils _httpUtils;
 
         public AccountController(
             UserManager<ApplicationUser> userManager,
@@ -35,6 +37,7 @@ namespace PasswordHIBPWeb.Controllers
             _signInManager = signInManager;
             _emailSender = emailSender;
             _logger = logger;
+            _httpUtils = new HttpUtils();
         }
 
         [TempData]
@@ -209,6 +212,7 @@ namespace PasswordHIBPWeb.Controllers
         public IActionResult Register(string returnUrl = null)
         {
             ViewData["ReturnUrl"] = returnUrl;
+
             return View();
         }
 
@@ -218,10 +222,15 @@ namespace PasswordHIBPWeb.Controllers
         public async Task<IActionResult> Register(RegisterViewModel model, string returnUrl = null)
         {
             ViewData["ReturnUrl"] = returnUrl;
+
             if (ModelState.IsValid)
             {
                 var user = new ApplicationUser { UserName = model.Email, Email = model.Email };
+
+                bool safePassword = await PasswordIsSafe(model.Password);
+
                 var result = await _userManager.CreateAsync(user, model.Password);
+
                 if (result.Succeeded)
                 {
                     _logger.LogInformation("User created a new account with password.");
@@ -232,12 +241,13 @@ namespace PasswordHIBPWeb.Controllers
 
                     await _signInManager.SignInAsync(user, isPersistent: false);
                     _logger.LogInformation("User created a new account with password.");
+
                     return RedirectToLocal(returnUrl);
                 }
+
                 AddErrors(result);
             }
 
-            // If we got this far, something failed, redisplay form
             return View(model);
         }
 
@@ -430,14 +440,11 @@ namespace PasswordHIBPWeb.Controllers
             return View();
         }
 
-
         [HttpGet]
         public IActionResult AccessDenied()
         {
             return View();
         }
-
-        #region Helpers
 
         private void AddErrors(IdentityResult result)
         {
@@ -459,6 +466,34 @@ namespace PasswordHIBPWeb.Controllers
             }
         }
 
-        #endregion
+        private async Task<bool> PasswordIsSafe(string password)
+        {
+            bool passwordIsSafe = false;
+            string sha1HashedPassword = HashingHelper.Hash(password);
+            var hashedPasswordEntries = await _httpUtils.GetPasswordsByRange(sha1HashedPassword);
+            int totalOccurences = 0;
+            PasswordHashEntry foundEntry = null;
+
+            foreach (var passwordHashEntry in hashedPasswordEntries)
+            {
+                totalOccurences += passwordHashEntry.Occurences;
+
+                if (sha1HashedPassword == passwordHashEntry.Hash)
+                {
+                    foundEntry = passwordHashEntry;
+
+                    System.Diagnostics.Debug.WriteLine($"Found: {passwordHashEntry.Hash} with {passwordHashEntry.Occurences} occurences");
+                }
+            }
+
+            if (foundEntry == null)
+            {
+                passwordIsSafe = true;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"Found {totalOccurences} hashes.");
+
+            return passwordIsSafe;
+        }
     }
 }
