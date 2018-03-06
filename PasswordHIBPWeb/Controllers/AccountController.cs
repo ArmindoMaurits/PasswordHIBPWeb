@@ -54,6 +54,13 @@ namespace PasswordHIBPWeb.Controllers
             return View();
         }
 
+        [HttpGet]
+        [AllowAnonymous]
+        public IActionResult PasswordHelp()
+        {
+            return View();
+        }
+
         [HttpPost]
         [AllowAnonymous]
         [ValidateAntiForgeryToken]
@@ -226,26 +233,32 @@ namespace PasswordHIBPWeb.Controllers
             if (ModelState.IsValid)
             {
                 var user = new ApplicationUser { UserName = model.Email, Email = model.Email };
+                PasswordHashEntry passwordHashEntry = await GetPasswordHashEntryAsync(model.Password);
 
-                bool safePassword = await PasswordIsSafe(model.Password);
-
-                var result = await _userManager.CreateAsync(user, model.Password);
-
-                if (result.Succeeded)
+                if (passwordHashEntry == null)
                 {
-                    _logger.LogInformation("User created a new account with password.");
+                    var result = await _userManager.CreateAsync(user, model.Password);
 
-                    var code = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-                    var callbackUrl = Url.EmailConfirmationLink(user.Id, code, Request.Scheme);
-                    await _emailSender.SendEmailConfirmationAsync(model.Email, callbackUrl);
+                    if (result.Succeeded)
+                    {
+                        _logger.LogInformation("User created a new account with password.");
 
-                    await _signInManager.SignInAsync(user, isPersistent: false);
-                    _logger.LogInformation("User created a new account with password.");
+                        var code = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+                        var callbackUrl = Url.EmailConfirmationLink(user.Id, code, Request.Scheme);
+                        await _emailSender.SendEmailConfirmationAsync(model.Email, callbackUrl);
 
-                    return RedirectToLocal(returnUrl);
+                        await _signInManager.SignInAsync(user, isPersistent: false);
+                        _logger.LogInformation("User created a new account with password.");
+
+                        return RedirectToLocal(returnUrl);
+                    }
+
+                    AddErrors(result);
                 }
-
-                AddErrors(result);
+                else
+                {
+                    AddPasswordError(passwordHashEntry);
+                }
             }
 
             return View(model);
@@ -466,34 +479,60 @@ namespace PasswordHIBPWeb.Controllers
             }
         }
 
+        private void AddPasswordError(PasswordHashEntry passwordHashEntry)
+        {
+            var url = Url.Action("PasswordHelp", "Account");
+
+            string passwordError = $"The chosen password is unsafe and has previously appeared {passwordHashEntry.Occurences} times in password breaches. Please choose a different one." ;
+
+            ModelState.AddModelError("passwordError", passwordError);
+        }
+
         private async Task<bool> PasswordIsSafe(string password)
         {
             bool passwordIsSafe = false;
             string sha1HashedPassword = HashingHelper.Hash(password);
             var hashedPasswordEntries = await _httpUtils.GetPasswordsByRange(sha1HashedPassword);
-            int totalOccurences = 0;
-            PasswordHashEntry foundEntry = null;
+            int similarOccurences = 0;
+            PasswordHashEntry foundEntry = hashedPasswordEntries.Find(entry => entry.Hash.Equals(sha1HashedPassword));
 
             foreach (var passwordHashEntry in hashedPasswordEntries)
             {
-                totalOccurences += passwordHashEntry.Occurences;
-
-                if (sha1HashedPassword == passwordHashEntry.Hash)
-                {
-                    foundEntry = passwordHashEntry;
-
-                    System.Diagnostics.Debug.WriteLine($"Found: {passwordHashEntry.Hash} with {passwordHashEntry.Occurences} occurences");
-                }
+                similarOccurences += passwordHashEntry.Occurences;
             }
 
+            _logger.LogInformation($"Found {similarOccurences} hashes.");
+
+            // The password is safe if it does not occur in the found hashes.
             if (foundEntry == null)
             {
+                _logger.LogInformation($"No exact Hash match found.");
+
                 passwordIsSafe = true;
             }
-
-            System.Diagnostics.Debug.WriteLine($"Found {totalOccurences} hashes.");
+            else
+            {
+                _logger.LogInformation($"Found: {foundEntry.Hash} with {foundEntry.Occurences} occurences");
+            }
 
             return passwordIsSafe;
+        }
+
+        private async Task<PasswordHashEntry> GetPasswordHashEntryAsync(string password)
+        {
+            string sha1HashedPassword = HashingHelper.Hash(password);
+            PasswordHashEntry passwordHashEntry = await _httpUtils.GetPasswordOccurences(sha1HashedPassword);
+
+            if (passwordHashEntry != null)
+            {
+                _logger.LogInformation($"Found: {passwordHashEntry.Hash} with {passwordHashEntry.Occurences} occurences");
+            }
+            else if (passwordHashEntry == null)
+            {
+                _logger.LogInformation($"No exact Hash match found.");
+            }
+
+            return passwordHashEntry;
         }
     }
 }

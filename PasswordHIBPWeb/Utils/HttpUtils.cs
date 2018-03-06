@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using PasswordHIBPWeb.Models;
 using System;
 using System.Collections.Generic;
@@ -13,15 +14,22 @@ namespace PasswordHIBPWeb.Utils
     public class HttpUtils
     {
         private static HttpClient client = new HttpClient();
+
+        /// <summary>
+        /// HaveIBeenPwned API URL
+        /// </summary>
         private readonly string baseUrl = string.Empty;
 
         public HttpUtils()
         {
             baseUrl = "https://api.pwnedpasswords.com";
-
-            client.BaseAddress = new Uri(baseUrl);
         }
 
+        /// <summary>
+        /// Gets a list of PasswordHashEntry objects by given SHA1 hashed password from HIBP API v2.
+        /// </summary>
+        /// <param name="hashedPassword"></param>
+        /// <returns>A list of PasswordHashEntry objects, based on parsed HIBP API return data.</returns>
         public async Task<List<PasswordHashEntry>> GetPasswordsByRange(string hashedPassword)
         {
             List<PasswordHashEntry> entries = null;
@@ -34,14 +42,52 @@ namespace PasswordHIBPWeb.Utils
                 string content = await GetJsonFromUri(uri);
                 entries = ParsePasswordsRangeFromApi(content);
             }
-            catch (NullReferenceException)
+            catch (NullReferenceException e)
             {
-                System.Diagnostics.Debug.WriteLine("HttpUtils:GetPasswordsByRange: Cannot get ranges");
+                System.Diagnostics.Debug.WriteLine($"HttpUtils: GetPasswordsByRange: Cannot get ranges. Message: {e}");
             }
 
             return entries;
         }
 
+        /// <summary>
+        /// Gets the amount of occurences based on hashed password and store it in a PasswordHashEntry.
+        /// </summary>
+        /// <param name="hashedPassword">SHA-1 hashed password.</param>
+        /// <returns>Filled PasswordHashEntry with total amount of occurences.</returns>
+        public async Task<PasswordHashEntry> GetPasswordOccurences(string hashedPassword)
+        {
+            PasswordHashEntry passwordHashEntry = null;
+
+            try
+            {
+                string uriString = $"{baseUrl}/pwnedpassword/{hashedPassword}";
+                Uri uri = new Uri(uriString);
+                string content = await GetJsonFromUri(uri);
+
+                if (int.TryParse(content, out int occurences))
+                {
+                    passwordHashEntry = new PasswordHashEntry()
+                    {
+                        Hash = hashedPassword,
+                        Occurences = occurences
+                    };
+                }
+
+            }
+            catch (Exception e)
+            {
+                System.Diagnostics.Debug.WriteLine($"HttpUtils: GetPasswordOccurences: Cannot get password occurences. Message: {e}");
+            }
+
+            return passwordHashEntry;
+        }
+
+        /// <summary>
+        /// Parses the return data from the HIBP API into a list of PasswordHashEntry object for simplification purposes.
+        /// </summary>
+        /// <param name="passwordsRange">One long string containing multiple newline-seperated entries. The entries are semicolom seperated hash:occurences object, e.g. 00D4F6E8FA6EECAD2A3AA415EEC418D38EC:2</param>
+        /// <returns>A list of parsed PasswordHashEntry objects, based on HIBP API return data.</returns>
         private List<PasswordHashEntry> ParsePasswordsRangeFromApi(string passwordsRange)
         {
             List<PasswordHashEntry> entries = null;
@@ -51,6 +97,8 @@ namespace PasswordHIBPWeb.Utils
                 entries = new List<PasswordHashEntry>();
             }
 
+            // Split entries on NewLine character (\r\n).
+            // PasswordsRange contains for example: 00D4F6E8FA6EECAD2A3AA415EEC418D38EC:2\r\n011053FD0102E94D6AE2F8B83D76FAF94F6:1
             foreach (var hashAndOccurences in passwordsRange.Split(new[] { Environment.NewLine }, StringSplitOptions.None))
             {
                 string[] items = hashAndOccurences.Split(':');
@@ -80,7 +128,8 @@ namespace PasswordHIBPWeb.Utils
             }
             catch (HttpRequestException)
             {
-                // TODO: Temp workaround to API unavailable. Log/pass through exception somewhere. 
+                System.Diagnostics.Debug.WriteLine("HttpUtils: GetJsonFromUri: API unavailable.");
+
                 return string.Empty;
             }
 
@@ -103,7 +152,8 @@ namespace PasswordHIBPWeb.Utils
             }
             catch (HttpRequestException)
             {
-                //TODO: Temp workaround to API unavailable. Log/pass through exception somewhere. 
+                System.Diagnostics.Debug.WriteLine("HttpUtils: PostJsonToUri: API unavailable.");
+
                 return string.Empty;
             }
 
@@ -123,7 +173,8 @@ namespace PasswordHIBPWeb.Utils
             }
             catch (HttpRequestException)
             {
-                //TODO: Temp workaround to API unavailable. Log/pass through exception somewhere. 
+                System.Diagnostics.Debug.WriteLine("HttpUtils: PutJsonToUri: API unavailable.");
+
                 return HttpStatusCode.InternalServerError;
             }
 
@@ -140,7 +191,8 @@ namespace PasswordHIBPWeb.Utils
             }
             catch (HttpRequestException)
             {
-                //TODO: Temp workaround to API unavailable. Log/pass through exception somewhere. 
+                System.Diagnostics.Debug.WriteLine("HttpUtils: DeleteToUri: API unavailable.");
+
                 return false;
             }
 
