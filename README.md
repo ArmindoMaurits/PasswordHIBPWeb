@@ -1,4 +1,4 @@
-# PasswordHIBPWeb
+# Have I been pwned API integration during account registration concept
 Concept ASP.NET Core MVC 2 site for implementing password check based on data of Haveibeenpwned.com v2 API. HIBP API is based on data of password breaches of +/- 500 million passwords.
 
 "Have I been pwned?" is the source of the data. See more info at https://haveibeenpwned.com/API/v2
